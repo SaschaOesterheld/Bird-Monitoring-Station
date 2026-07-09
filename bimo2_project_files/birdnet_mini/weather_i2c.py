@@ -19,6 +19,7 @@ class WeatherSensor:
             return
 
         # Safe configuration
+        self.sensor.altitude = 500
         self.sensor.set_humidity_oversample(bme680.OS_2X)
         self.sensor.set_pressure_oversample(bme680.OS_4X)
         self.sensor.set_temperature_oversample(bme680.OS_8X)

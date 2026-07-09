@@ -15,6 +15,9 @@ from pathlib import Path
 import librosa
 import numpy as np
 
+#Functions Website
+from database import init_db, insert_temperature, insert_bird_detection
+
 #################### Variables  ###################
 # Debug logging
 logger = logging.getLogger(__name__)
@@ -175,6 +178,8 @@ microphone = microphone_server2.microphone_server2(audio_file_dir=audio_dir, dev
 microphone_thread = threading.Thread(target=microphone.mainloop, daemon=True)
 microphone_thread.start()
 
+# Init Database
+init_db()
 ###################################################
 #################### MAIN LOOP ####################
 ###################################################
@@ -226,9 +231,15 @@ try:
                         # Prepare data to write to CSV
                         ai_output = f"Chunk {i} from {filename}: {prediction}"
                         data_to_save = [current_date, current_time, ai_output, weather_info]
+                        #Insert bird detection into db on website
+                        insert_bird_detection(str(prediction[0][1]).split('_')[1])
+                        logger.debug(f"Saved AI output to website db for chunk {i}.")
+                        #Insert temperature into db on website
+                        insert_temperature(weather_info["temperature"])
+                        logger.debug(f"Saved last temperature to website db.")
                         # Write the data to CSV
-                        write_to_csv(data_to_save)
-                        logger.debug(f"Saved AI output and weather for chunk {i} to CSV.")
+                        #write_to_csv(data_to_save)
+                        #logger.debug(f"Saved AI output and weather for chunk {i} to CSV.")
                 # After processing, delete the file from the folder
                 try:
                     filepath=Path(filepath)

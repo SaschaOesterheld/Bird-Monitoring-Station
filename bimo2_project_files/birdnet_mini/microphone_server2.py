@@ -7,7 +7,6 @@ from datetime import datetime
 class microphone_server2:
 	def __init__(self,audio_file_dir, device_id,sample_rate_manual,file_length=6):
 			print("Microphone Server Init...")
-			print(r"Have you set the right Device ID for the Mic? Here is a list :)")
 			print(sd.query_devices())
 
 			# ===== Configuration =====
