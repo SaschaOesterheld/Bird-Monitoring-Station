@@ -1,4 +1,19 @@
-﻿import sys
+"""
+LCD driver for the Bird Monitor system.
+
+This module provides a high-level interface for controlling a 20x4
+HD44780-compatible LCD over an I²C backpack. It handles low-level LCD
+communication, periodically updates the display with bird detections and
+weather information, and provides utility methods for displaying text.
+
+The display alternates between:
+    - Current date and time with the most recently detected bird.
+    - Current weather conditions obtained from the weather sensor.
+
+The LCD update loop is intended to run in a dedicated background thread.
+"""
+
+import sys
 
 sys.path.append("./lib")
 
@@ -57,43 +72,87 @@ Rw = 0b00000010  # Read/Write bit
 Rs = 0b00000001  # Register select bit
 
 
-class lcd:
+class LCD:
+    """
+    Driver for a HD44780-compatible LCD connected via I²C.
+
+    The class provides methods for writing commands and text to the display,
+    controlling the backlight, clearing the screen, and running a continuous
+    display loop that alternates between bird detection results and weather
+    information.
+    """
     # Initializes objects and lcd
     def __init__(self,width=20,height=4):
-        print("Initialising LCD...")
-        self.lcd_device = i2c_lib.i2c_device(ADDRESS)
+        """
+        Initialize the LCD controller.
 
-        self.lcd_write(0x03)
-        self.lcd_write(0x03)
-        self.lcd_write(0x03)
-        self.lcd_write(0x02)
+        Configures the LCD hardware, initializes display parameters,
+        creates a weather sensor instance, and prepares internal state.
 
-        self.lcd_write(LCD_FUNCTIONSET | LCD_2LINE | LCD_5x8DOTS | LCD_4BITMODE)
-        self.lcd_write(LCD_DISPLAYCONTROL | LCD_DISPLAYON)
-        self.lcd_write(LCD_CLEARDISPLAY)
-        self.lcd_write(LCD_ENTRYMODESET | LCD_ENTRYLEFT)
-        # Time before display changes what its showing
-        self.display_time = 3
-        self.width = width
-        self.height = height
-        # Last Bird heard
-        self.last_bird = "None"
-        self.last_bird_timestamp = ""
-        self.last_bird_updated = False
-        time.sleep(0.2)
-        
-        self.weather_sensor=weather_i2c.WeatherSensor()
+        Args:
+            width: Number of LCD columns.
+            height: Number of LCD rows.
+        """
+        try:
+            print("Initialising LCD...")
+            self.lcd_device = i2c_lib.i2c_device(ADDRESS)
+            self.lcd_write(0x03)
+            self.lcd_write(0x03)
+            self.lcd_write(0x03)
+            self.lcd_write(0x02)
 
-        # clocks EN to latch command
-    
-    def adjust_string(self,text,display_in_line,display_height=4,display_width=16):
+            self.lcd_write(LCD_FUNCTIONSET | LCD_2LINE | LCD_5x8DOTS | LCD_4BITMODE)
+            self.lcd_write(LCD_DISPLAYCONTROL | LCD_DISPLAYON)
+            self.lcd_write(LCD_CLEARDISPLAY)
+            self.lcd_write(LCD_ENTRYMODESET | LCD_ENTRYLEFT)
+            # Time before display changes what its showing
+            self.display_time = 3
+            self.width = width
+            self.height = height
+            # Last Bird heard
+            self.last_bird = "None"
+            self.last_bird_timestamp = ""
+            self.last_bird_updated = False
+            time.sleep(0.2)
+            self.weather_sensor=weather_i2c.WeatherSensor()
+            self.exists=True
+            lcd.status_message = "LCD Initialisation successful"
+            return self
+            # clocks EN to latch command
+        except Exception as e:
+            self.exists=False
+            lcd.status_message = f"LCD Initialisation failed with Error: {e}"
+            return self
+            
+    def adjust_string(self,text,display_in_line,display_height=self.width,display_width=self.height):
+        """
+        Pad or truncate a string to fit the LCD width.
+
+        Args:
+            text: Text to format.
+            display_in_line: Target display line.
+            display_height: Number of display rows.
+            display_width: Number of display columns.
+
+        Returns:
+            A string formatted for the display or an empty string if the
+            requested line exceeds the display height.
+        """
         if display_in_line>display_height:return ""
         else:
-            temp = str(text)
-            return text.ljust(width)[:width]
+            return str(text).ljust(display_width)[:display_width]
             
     def split_for_lcd(self):
-        
+        """
+        Split the current bird name across two LCD lines.
+
+        The method attempts to split at spaces or hyphens whenever
+        possible. If no suitable split point exists, the word is
+        hyphenated.
+
+        Returns:
+            A tuple containing the first and second display lines.
+        """
         text = str(self.last_bird)
         width = self.width
         # Fits entirely on one line
@@ -117,22 +176,51 @@ class lcd:
         return line1, line2
 
     def lcd_strobe(self, data):
+        """
+        Toggle the LCD enable pin to latch data.
+
+        Args:
+            data: Data byte to transmit.
+        """
+        if not self.exists:return
         self.lcd_device.write_cmd(data | En | LCD_BACKLIGHT)
         time.sleep(.0005)
         self.lcd_device.write_cmd(((data & ~En) | LCD_BACKLIGHT))
         time.sleep(.0001)
 
     def lcd_write_four_bits(self, data):
+        """
+        Write a four-bit nibble to the LCD.
+
+        Args:
+            data: Four-bit data value.
+        """
+        if not self.exists:return
         self.lcd_device.write_cmd(data | LCD_BACKLIGHT)
         self.lcd_strobe(data)
 
     # write a command to lcd
     def lcd_write(self, cmd, mode=0):
+        """
+        Send a command or character to the LCD.
+
+        Args:
+            cmd: LCD command or character value.
+            mode: Register select mode (instruction or data).
+        """
+        if not self.exists:return
         self.lcd_write_four_bits(mode | (cmd & 0xF0))
         self.lcd_write_four_bits(mode | ((cmd << 4) & 0xF0))
 
     # Turn on/off the lcd backlight
     def lcd_backlight(self, state):
+        """
+        Control the LCD backlight.
+
+        Args:
+            state: Either "on" or "off".
+        """
+        if not self.exists:return
         if state in ("on", "On", "ON"):
             self.lcd_device.write_cmd(LCD_BACKLIGHT)
         elif state in ("off", "Off", "OFF"):
@@ -142,6 +230,14 @@ class lcd:
 
     # put string function
     def lcd_display_string(self, string, line):
+        """
+        Display text on a specific LCD line.
+
+        Args:
+            string: Text to display.
+            line: LCD line number (1–4).
+        """
+        if not self.exists: return
         if line == 1:
             self.lcd_write(0x80)
         if line == 2:
@@ -156,11 +252,27 @@ class lcd:
 
     # clear lcd and set to home
     def lcd_clear(self):
+        """
+        Display text on a specific LCD line.
+
+        Args:
+            string: Text to display.
+            line: LCD line number (1–4).
+        """
+        if not self.exists: return
         self.lcd_write(LCD_CLEARDISPLAY)
         self.lcd_write(LCD_RETURNHOME)
 
     def mainloop(self):
+        """
+        Display text on a specific LCD line.
+
+        Args:
+            string: Text to display.
+            line: LCD line number (1–4).
+        """
         print("Entering LCD Main Loop!")
+        if not self.exists: return
         while True:
             self.lcd_clear()
             # Put Last Bird Info on LCD, and wait out LCD Timer
@@ -171,7 +283,6 @@ class lcd:
                 self.last_bird_timestamp = f"({self.last_bird_timestamp})"
                 self.last_bird_updated = False 
             self.lcd_display_string(f"Last heard{self.last_bird_timestamp}:", 2)
-            print(self.last_bird)
             #Format and print bird name to screen
             line1,line2 = self.split_for_lcd()
             if line2 == ":" or line2 == "":line2=None
