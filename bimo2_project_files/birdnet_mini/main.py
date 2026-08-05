@@ -1,3 +1,31 @@
+"""
+ This is the Main application for the BiMo2 system.
+
+This module coordinates the operation of BiMo2 by 
+(1) initializing hardware components,
+(2) loading the BirdNET machine learning model,
+(3) continuously processing recorded audio to identify bird species an finally
+(4) sending the generated data to a website.
+
+Responsibilities:
+- Initialize the LCD Handler, and Microphone Server
+- Load the BirdNET TensorFlow Lite model and label file with bird names
+- Monitor the recording directory for new audio files
+- Resample and split audio recordings into inference-ready chunks
+- Run bird species classification on each audio segment
+- send the most recently detected bird and weather to the LCD Handler
+- send weather measurements and bird detections to the website
+- Manage temporary audio files and perform directory housekeeping
+
+The application is intended to run continuously on a Raspberry Pi and uses
+background threads for the LCD interface and audio recording while the main
+thread performs audio processing and bird classification. Weather data is
+read before the sending of data to the website.
+
+Author - Sascha Oesterheld
+05.08.2026
+"""
+
 #################### Libraries ####################
 import os
 import audio
@@ -10,7 +38,7 @@ import lcddriver
 from datetime import datetime as dt
 import logging
 import threading
-import microphone_server2
+import microphone_server
 from pathlib import Path
 import librosa
 import numpy as np
@@ -39,12 +67,29 @@ model_file = BASE_DIR / "models/BirdNET_GLOBAL_6K_V2.4_Model_FP32.tflite"
 # Set the Log Filepath
 log_dir = BASE_DIR / LOGGING_DIR_NAME
 log_file = log_dir / f"{Path(__file__).stem}.log"
+os.makedirs(log_dir, exist_ok=True)
 logger.addHandler(logging.FileHandler(log_file))
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s")
 
+# Ensure directories exist
+os.makedirs(audio_dir, exist_ok=True)
+os.makedirs(csv_dir, exist_ok=True)
 
 #################### Functions ####################
 def adjust_string(input_string):
+    """
+    Format a string for the LCD display.
+
+    Strings longer than 20 characters are truncated.
+    Shorter strings are padded with spaces so that the
+    returned string is exactly 20 characters long.
+
+    Args:
+        input_string: Input text.
+
+    Returns:
+        A 20-character string suitable for LCD output.
+    """
     # If the string is longer than 20 characters, slice it
     if len(input_string) > 20:
         return input_string[:20]
@@ -54,6 +99,15 @@ def adjust_string(input_string):
 
 
 def remove_spaces_commas(input_string):
+    """
+    Remove spaces and commas from a string.
+
+    Args:
+        input_string: String to clean.
+
+    Returns:
+        The cleaned string.
+    """
     return input_string.replace(" ", "").replace(",", "")
 
 
@@ -80,14 +134,34 @@ def write_to_csv(data):
         writer.writerow(data)
     
 def to_48k(samples, sr=sample_rate):
-    if len(signal) % 48000 == 0:
-        return signal.astype(np.float32)
+    """
+    Resample an audio signal to 48 kHz.
+
+    Args:
+        samples: Audio samples.
+        sr: Original sampling rate.
+
+    Returns:
+        Audio samples resampled to 48 kHz as float32.
+    """
+    if len(samples) % 48000 == 0:
+        return samples.astype(np.float32)
     return librosa.resample(
-        signal.astype(np.float32),
+        samples.astype(np.float32),
         orig_sr=16000,
-        target_sr=4800)
+        target_sr=48000)
 
 def fix_length(x, target_len=144000):
+    """
+    Pad or trim an audio signal to a fixed length.
+
+    Args:
+        x: Audio samples.
+        target_len: Desired number of samples.
+
+    Returns:
+        Audio array with exactly ``target_len`` samples.
+    """
     if len(x) > target_len:
         return x[:target_len]
     elif len(x) < target_len:
@@ -96,8 +170,15 @@ def fix_length(x, target_len=144000):
     
 def prune_wav_files(directory=audio_dir, max_files=40):
     """
-    Keep at most max_files .wav files in directory.
-    Deletes the oldest files if the count exceeds max_files.
+    Delete the oldest WAV files once the directory exceeds
+    the configured maximum number of recordings.
+
+    Args:
+        directory: Directory containing WAV files.
+        max_files: Maximum number of WAV files to keep.
+
+    Returns:
+        Number of deleted files.
     """
     # Get full paths to .wav files
     wav_files = [
@@ -122,59 +203,55 @@ def prune_wav_files(directory=audio_dir, max_files=40):
             os.remove(path)
             deleted += 1
         except Exception as e:
-            print(f"Failed to delete {path}: {e}")
+            logger.debug(f"Failed to delete {path}: {e}")
 
     return deleted
 
 
 #################### Setup ####################
 # Display
-lcd = lcddriver.lcd()
+lcd = lcddriver.LCD()
+logger.debug(lcd.status_message)
 lcd.lcd_clear()
 
 # Display Startup ASCII-Art
-lcd.lcd_display_string(adjust_string(r" - Bird Monitor 2 - "), 2)
+lcd.lcd_display_string(r" - Bird Monitor 2 - ",2)
 time.sleep(3)
-lcd.lcd_display_string(adjust_string(r"    __      ___     "), 1)
-lcd.lcd_display_string(adjust_string(r"   / ;> \__/owo\    "), 2)
-lcd.lcd_display_string(adjust_string(r" -/_)')  \__)_/     "), 3)
-lcd.lcd_display_string(adjust_string(r"___/_/_____//_______"), 4)
+lcd.lcd_display_string(r"    __      ___     ",1)
+lcd.lcd_display_string(r"   / ;> \__/owo\    ",2)
+lcd.lcd_display_string(r" -/_)')  \__)_/     ",3)
+lcd.lcd_display_string(r"___/_/_____//_______",4)
 time.sleep(4)
 lcd.lcd_clear()
-lcd.lcd_display_string(adjust_string(r" - Bird Monitor 2 - "), 2)
-lcd.lcd_display_string(adjust_string(r"Setup..."), 3)
+lcd.lcd_display_string(r" - Bird Monitor 2 - ",2)
+lcd.lcd_display_string(r"Setup...",3)
+
 
 #Weather Sensor
 weather_sensor = WeatherSensor()
 
-# Ensure directories exist
-os.makedirs(audio_dir, exist_ok=True)
-os.makedirs(csv_dir, exist_ok=True)
-os.makedirs(log_dir, exist_ok=True)
+
 
 # Startup bird detection model
 logger.debug('Loading labels...')
-lcd.lcd_display_string(adjust_string("Loading model labels..."), 2)
 # Load the labels
 try:
     with open(label_file, "r") as f:
         labels = f.read().splitlines()
 except FileNotFoundError:
-    lcd.lcd_display_string(adjust_string("Label file not found!"), 2)
-    lcd.lcd_display_string(adjust_string("Terminating..."), 2)
-    exit()
+    logger.debug("Label file not found!")
+    logger.debug("Terminating...")
+    SystemExit(1)
 # Get the model instance
 logger.debug('Loading model...')
-lcd.lcd_display_string(adjust_string("Loading model..."), 2)
 model_instance = model.Model(model_path=str(model_file), labels=labels)
-
 
 # Start the LCDs display loop parallel to the mainloop
 lcd_loop_thread = threading.Thread(target=lcd.mainloop, daemon=True)
 lcd_loop_thread.start()
 
 # Start reading from the microphone
-microphone = microphone_server2.microphone_server2(audio_file_dir=audio_dir, device_id=mic_device_id,sample_rate_manual=sample_rate)
+microphone = microphone_server.Microphone_Server(audio_file_dir=audio_dir, device_id=mic_device_id,sample_rate_manual=sample_rate)
 microphone_thread = threading.Thread(target=microphone.mainloop, daemon=True)
 microphone_thread.start()
 
@@ -192,7 +269,6 @@ try:
         if len(audiofiles) == 0:
             time.sleep(3)
             logger.debug("No files to process. Waiting...")
-            print("No Files")
             continue
 
         # Process each file in the directory
@@ -211,7 +287,6 @@ try:
 
                 # Run model for each chunk to get identification predictions
                 logger.debug("Predicting...")
-                print("Predicting!")
                 for i in range(0, len(chunks)):
                     chunk = fix_length(chunks[i])
                     prediction = model_instance.predict(samples=chunks[i])
@@ -227,7 +302,6 @@ try:
                         lcd.last_bird_updated = True
                         #TODO get weather info
                         weather_info = weather_sensor.read()
-                        print(weather_info)
                         # Prepare data to write to CSV
                         ai_output = f"Chunk {i} from {filename}: {prediction}"
                         data_to_save = [current_date, current_time, ai_output, weather_info]
@@ -253,6 +327,7 @@ try:
                     logger.debug("No permission to delete %s", filepath)
                 # TODO SEND DATA TO WEBSITE PERIODICALLY
 except Exception as e:
-    print("Exception in main.py mainloop")
-    print(e)
+    logger.debug("Exception in main.py mainloop:")
+    logger.debug(e)
+    logger.debug("Shutting Down")
             
