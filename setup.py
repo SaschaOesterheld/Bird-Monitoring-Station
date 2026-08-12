@@ -91,7 +91,7 @@ def install_systemd_service():
         #Setup service Vars
         print("Setting up Systemd service for the Program. This will make it start automatically on boot.")
         service_name = "bird-monitoring-station.service"
-        working_dir = (project_dir/ "Bird-Monitoring-Station" / "bimo2_project_files" / "birdnet_mini")
+        working_dir = (project_dir/ "bimo2_project_files" / "birdnet_mini")
         log_location = (project_dir / "bimo2_project_files" /  "logs" / "systemlog_main.log")
         log_location.parent.mkdir(parents=True, exist_ok=True)
         main_script = working_dir / "main.py"
@@ -111,23 +111,23 @@ def install_systemd_service():
         #Setup Service File
         service = \
         f"""[Unit]
-            Description=Bird Monitoring Station Main Program controlling BIMO2 Funtionalities
-            After=network.target
+Description=Bird Monitoring Station Main Program controlling BIMO2 Funtionalities
+After=network.target
             
-            [Service]
-            User={user}
-            WorkingDirectory={working_dir}
-            ExecStart={python_exec} {main_script}
-            Restart=always
-            RestartSec=5
+[Service]
+User={user}
+WorkingDirectory={working_dir}
+ExecStart={python_exec} {main_script}
+Restart=always
+RestartSec=5
+           
+StandardOutput=append:{log_location}
+StandardError=append:{log_location}
+           
+Environment=PYTHONUNBUFFERED=1
             
-            StandardOutput=append:{log_location}
-            StandardError=append:{log_location}
-            
-            Environment=PYTHONUNBUFFERED=1
-            
-            [Install]
-            WantedBy=multi-user.target
+[Install]
+WantedBy=multi-user.target
         """
         tmp_service = Path("/tmp") / service_name
         tmp_service.write_text(service)
