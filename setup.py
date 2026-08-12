@@ -90,7 +90,7 @@ def install_systemd_service():
     try:
         #Setup service Vars
         print("Setting up Systemd service for the Program. This will make it start automatically on boot.")
-        service_name = "bird-monitoring-station.service"
+        service_name = "bimo2.service"
         working_dir = (project_dir/ "bimo2_project_files" / "birdnet_mini")
         log_location = (project_dir / "bimo2_project_files" /  "logs" / "systemlog_main.log")
         log_location.parent.mkdir(parents=True, exist_ok=True)
