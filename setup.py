@@ -116,7 +116,6 @@ After=network.target
             
 [Service]
 User={user}
-WorkingDirectory={working_dir}
 ExecStart={python_exec} {main_script}
 Restart=always
 RestartSec=5
