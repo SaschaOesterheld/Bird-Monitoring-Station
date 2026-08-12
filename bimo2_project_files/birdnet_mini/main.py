@@ -250,8 +250,10 @@ model_instance = model.Model(model_path=str(model_file), labels=labels)
 lcd_loop_thread = threading.Thread(target=lcd.mainloop, daemon=True)
 lcd_loop_thread.start()
 
+#Cleanup Wav File Dir
+prune_wav_files(max_files = 0)
 # Start reading from the microphone
-microphone = microphone_server.Microphone_Server(audio_file_dir=audio_dir, device_id=mic_device_id,sample_rate_manual=sample_rate)
+microphone = microphone_server.Microphone_Server(audio_file_dir=audio_dir, sample_rate_manual=sample_rate)
 microphone_thread = threading.Thread(target=microphone.mainloop, daemon=True)
 microphone_thread.start()
 
@@ -289,7 +291,7 @@ try:
                 logger.debug("Predicting...")
                 for i in range(0, len(chunks)):
                     chunk = fix_length(chunks[i])
-                    prediction = model_instance.predict(samples=chunks[i])
+                    prediction = model_instance.predict(samples=chunk)
                     if prediction[0][2] > float(0.2):
                         last_bird = prediction[0][1]
                         last_bird = last_bird.split("_")[1]
@@ -306,11 +308,14 @@ try:
                         ai_output = f"Chunk {i} from {filename}: {prediction}"
                         data_to_save = [current_date, current_time, ai_output, weather_info]
                         #Insert bird detection into db on website
-                        insert_bird_detection(str(prediction[0][1]).split('_')[1])
-                        logger.debug(f"Saved AI output to website db for chunk {i}.")
+                        formated_detection = str(prediction[0][1]).split('_')[1]
+                        if formated_detection is not None:
+                            insert_bird_detection(formated_detection)
+                            logger.debug(f"Saved AI output to website db for chunk {i}.")
                         #Insert temperature into db on website
-                        insert_temperature(weather_info["temperature"])
-                        logger.debug(f"Saved last temperature to website db.")
+                        if weather_info is not None:
+                            insert_temperature(weather_info["temperature"])
+                            logger.debug(f"Saved last temperature to website db.")
                         # Write the data to CSV
                         #write_to_csv(data_to_save)
                         #logger.debug(f"Saved AI output and weather for chunk {i} to CSV.")
@@ -327,7 +332,6 @@ try:
                     logger.debug("No permission to delete %s", filepath)
                 # TODO SEND DATA TO WEBSITE PERIODICALLY
 except Exception as e:
-    logger.debug("Exception in main.py mainloop:")
-    logger.debug(e)
+    logger.exception("Exception in main.py mainloop:")
     logger.debug("Shutting Down")
             
