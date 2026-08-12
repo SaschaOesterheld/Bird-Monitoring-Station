@@ -1,4 +1,4 @@
-```python
+
 """
 TensorFlow Lite model wrapper for bird species classification.
 
