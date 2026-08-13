@@ -93,6 +93,8 @@ class LCD:
             width: Number of LCD columns.
             height: Number of LCD rows.
         """
+        self.exists=True
+        self.status_message="No Init and no Error, somwthing went horribly wrong while initalising the LCD!"
         try:
             print("Initialising LCD...")
             self.lcd_device = i2c_lib.i2c_device(ADDRESS)
@@ -116,15 +118,14 @@ class LCD:
             time.sleep(0.2)
             self.weather_sensor=weather_i2c.WeatherSensor()
             self.exists=True
-            lcd.status_message = "LCD Initialisation successful"
-            return self
+            self.status_message = "LCD Initialisation successful"
             # clocks EN to latch command
         except Exception as e:
             self.exists=False
-            lcd.status_message = f"LCD Initialisation failed with Error: {e}"
-            return self
+            self.status_message = f"LCD Initialisation failed with Error: {e}"
+
             
-    def adjust_string(self,text,display_in_line,display_height=self.width,display_width=self.height):
+    def adjust_string(self,text,display_in_line,display_height=-1,display_width=-1):
         """
         Pad or truncate a string to fit the LCD width.
 
@@ -138,6 +139,8 @@ class LCD:
             A string formatted for the display or an empty string if the
             requested line exceeds the display height.
         """
+        if display_heigt == -1: display_height = self.height
+        if display_width == -1: display_width = self.width
         if display_in_line>display_height:return ""
         else:
             return str(text).ljust(display_width)[:display_width]
